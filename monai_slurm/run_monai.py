@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import nibabel as nib
 
@@ -13,8 +14,10 @@ from monai.utils import set_determinism
 
 monai.config.print_config()
 
-PIXDIM = (0.8, 0.8, 1.25)
 device = torch.device('cuda:0')
+
+PIXDIM = json.loads(os.environ.get('PIXDIM', '[0.7, 0.7, 0.7]'))
+PATCH_SIZE = json.loads(os.environ.get('PATCH_SIZE', '[256, 256, 16]'))
 
 data_path = os.environ.get('DATA_PATH')
 results_path = os.environ.get('RESULTS_PATH')
@@ -31,11 +34,11 @@ train_labels = sorted(
 )
 
 data_dicts = [
-    {'image': image_name, 'label': label_name}
+    {'image': image_name, 'label': label_name, 'patient': image_name.split('/')[1].replace('data', '').replace('.nii.gz', '')}
     for image_name, label_name in zip(train_images, train_labels)
 ]
 train_files, val_files = data_dicts[:6] + data_dicts[8:], data_dicts[6:8]
-print(len(train_files), len(val_files))
+print(f'Training patients: {len(train_files)}, Validation patients: {len(val_files)}')
 
 set_determinism(seed=0)
 
@@ -51,7 +54,7 @@ train_transforms = Compose(
         RandCropByPosNegLabeld(
             keys=["image", "label"],
             label_key="label",
-            spatial_size=(256, 256, 16),
+            spatial_size=PATCH_SIZE,
             pos=1,
             neg=1,
             num_samples=16,
@@ -137,7 +140,7 @@ for epoch in range(epoch_num):
                     val_data['image'].to(device),
                     val_data['label'].to(device),
                 )
-                roi_size = (256, 256, 16)
+                roi_size = PATCH_SIZE
                 sw_batch_size = 1
                 val_outputs = sliding_window_inference(
                     val_inputs, roi_size, sw_batch_size, model
@@ -165,20 +168,20 @@ for epoch in range(epoch_num):
             )
 
 
-IDX_TO_PATIENT = {0: 'P06B06', 1: 'P07B07'}
-
 model.eval()
 with torch.no_grad():
     for i, val_data in enumerate(val_loader):
-        roi_size = (256, 256, 16)
+        patient = val_data["patient"][0]
+
+        roi_size = PATCH_SIZE
         sw_batch_size = 1
         val_outputs = sliding_window_inference(
             val_data['image'].to(device), roi_size, sw_batch_size, model
         )
 
-        data_path = output_path / f'transformed_data_{IDX_TO_PATIENT[i]}.nii.gz'
-        label_path = output_path / f'transformed_label_{IDX_TO_PATIENT[i]}.nii.gz'
-        pred_path = output_path / f'predicted_segmentation_{IDX_TO_PATIENT[i]}.nii.gz'
+        data_path = output_path / f'transformed_data_{patient}.nii.gz'
+        label_path = output_path / f'transformed_label_{patient}.nii.gz'
+        pred_path = output_path / f'predicted_segmentation_{patient}.nii.gz'
         nib.save(nib.Nifti1Image(val_data['image'][0][0].numpy(), np.eye(4)), data_path)
         nib.save(
             nib.Nifti1Image(val_data['label'][0][0].numpy(), np.eye(4)), label_path
