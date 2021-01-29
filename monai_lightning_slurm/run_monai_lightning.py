@@ -1,0 +1,259 @@
+import os
+import json
+from pathlib import Path
+import nibabel as nib
+
+import torch
+import pytorch_lightning
+import monai
+from monai.data import NiftiSaver, DataLoader, Dataset, PersistentDataset
+from monai.transforms import *
+from monai.inferers import sliding_window_inference
+from monai.networks.layers import Norm
+from monai.metrics import compute_meandice
+from monai.utils import set_determinism
+
+monai.config.print_config()
+
+device = torch.device('cuda:0')
+
+PIXDIM = json.loads(os.environ.get('PIXDIM', '[0.7, 0.7, 0.7]'))
+PATCH_SIZE = json.loads(os.environ.get('PATCH_SIZE', '[256, 256, 16]'))
+CHANNELS = json.loads(os.environ.get('CHANNELS', '[16, 32, 64]'))
+STRIDES = json.loads(os.environ.get('STRIDES', '[2, 2, 2, 2]'))
+
+data_path = os.environ.get('DATA_PATH')
+cache_path = os.environ.get('CACHE_PATH')
+results_path = os.environ.get('RESULTS_PATH')
+job_id = os.environ.get('SLURM_JOBID')
+
+
+class LymphomaNet(pytorch_lightning.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self._model = monai.networks.nets.UNet(
+            dimensions=3,
+            in_channels=1,
+            out_channels=2,
+            channels=CHANNELS,
+            strides=STRIDES,
+            num_res_units=2,
+            norm=Norm.BATCH,
+            dropout=0.2,
+        )
+        self.loss_function = monai.losses.GeneralizedDiceLoss(
+            to_onehot_y=True, softmax=True
+        )
+        # is it necessary?
+        self.post_pred = AsDiscrete(argmax=True, to_onehot=True, n_classes=2)
+        self.post_label = AsDiscrete(to_onehot=True, n_classes=2)
+
+        # is it necessary?
+        self.best_val_dice = 0
+        self.best_val_epoch = 0
+
+    def forward(self, x):
+        return self._model(x)
+
+    def prepare_data(self):
+        train_images = sorted(
+            [
+                os.path.join(data_path, x)
+                for x in os.listdir(data_path)
+                if x.startswith('data')
+            ]
+        )
+        train_labels = sorted(
+            [
+                os.path.join(data_path, x)
+                for x in os.listdir(data_path)
+                if x.startswith('label')
+            ]
+        )
+        data_dicts = [
+            {
+                'image': image_name,
+                'label': label_name,
+                'patient': image_name.split('/')[1]
+                .replace('data', '')
+                .replace('.nii.gz', ''),
+            }
+            for image_name, label_name in zip(train_images, train_labels)
+        ]
+        train_files, val_files = data_dicts[:6] + data_dicts[8:], data_dicts[6:8]
+        print(
+            f'Training patients: {len(train_files)}, Validation patients: {len(val_files)}'
+        )
+
+        set_determinism(seed=0)
+
+        train_transforms = Compose(
+            [
+                LoadNiftid(keys=['image', 'label']),
+                AddChanneld(keys=['image', 'label']),
+                Spacingd(
+                    keys=["image", "label"], pixdim=PIXDIM, mode=("bilinear", "nearest")
+                ),
+                ScaleIntensityRanged(
+                    keys=["image"],
+                    a_min=-100,
+                    a_max=300,
+                    b_min=0.0,
+                    b_max=1.0,
+                    clip=True,
+                ),
+                CropForegroundd(keys=["image", "label"], source_key="image"),
+                RandCropByPosNegLabeld(
+                    keys=["image", "label"],
+                    label_key="label",
+                    spatial_size=PATCH_SIZE,
+                    pos=1,
+                    neg=1,
+                    num_samples=16,
+                    image_key="image",
+                    image_threshold=0,
+                ),
+                RandFlipd(["image", "label"], spatial_axis=[0, 1, 2], prob=0.5),
+                ToTensord(keys=['image', 'label']),
+            ]
+        )
+        val_transforms = Compose(
+            [
+                LoadNiftid(keys=['image', 'label']),
+                AddChanneld(keys=['image', 'label']),
+                Spacingd(
+                    keys=["image", "label"], pixdim=PIXDIM, mode=("bilinear", "nearest")
+                ),
+                ScaleIntensityRanged(
+                    keys=["image"],
+                    a_min=-100,
+                    a_max=300,
+                    b_min=0.0,
+                    b_max=1.0,
+                    clip=True,
+                ),
+                CropForegroundd(keys=["image", "label"], source_key="image"),
+                ToTensord(keys=['image', 'label']),
+            ]
+        )
+
+        self.train_ds = PersistentDataset(
+            data=train_files, transform=train_transforms, cache_dir=cache_path
+        )
+        self.val_ds = PersistentDataset(
+            data=val_files, transform=val_transforms, cache_dir=cache_path
+        )
+
+    def train_dataloader(self):
+        train_loader = DataLoader(
+            self.train_ds, batch_size=1, shuffle=True, num_workers=0
+        )
+        return train_loader
+
+    def val_dataloader(self):
+        val_loader = DataLoader(self.val_ds, batch_size=1, num_workers=0)
+        return val_loader
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self._model.parameters(), 1e-3)
+        return optimizer
+
+    def training_step(self, batch, batch_idx):
+        images, labels = batch["image"], batch["label"]
+        output = self.forward(images)
+        loss = self.loss_function(output, labels)
+        # tensorboard_logs = {"train_loss": loss.item()}
+        return {"loss": loss}  # "log": tensorboard_logs}
+
+    def validation_step(self, batch, batch_idx):
+        images, labels = batch["image"], batch["label"]
+        roi_size = PATCH_SIZE
+        sw_batch_size = 1
+        outputs = sliding_window_inference(
+            images, roi_size, sw_batch_size, self.forward
+        )
+        loss = self.loss_function(outputs, labels)
+        outputs = self.post_pred(outputs)
+        labels = self.post_label(labels)
+        value = compute_meandice(y_pred=outputs, y=labels, include_background=False)
+        return {"val_loss": loss, "val_dice": value}
+
+    def validation_epoch_end(self, outputs):
+        val_dice, val_loss, num_items = 0, 0, 0
+        for output in outputs:
+            val_dice += output["val_dice"].sum().item()
+            val_loss += output["val_loss"].sum().item()
+            num_items += len(output["val_dice"])
+        mean_val_dice = torch.tensor(val_dice / num_items)
+        mean_val_loss = torch.tensor(val_loss / num_items)
+        tensorboard_logs = {"val_dice": mean_val_dice, "val_loss": mean_val_loss}
+        if mean_val_dice > self.best_val_dice:
+            self.best_val_dice = mean_val_dice
+            self.best_val_epoch = self.current_epoch
+        print(
+            f"current epoch: {self.current_epoch} current mean dice: {mean_val_dice:.4f}"
+            f"\nbest mean dice: {self.best_val_dice:.4f} at epoch: {self.best_val_epoch}"
+        )
+        return {"log": tensorboard_logs}
+
+
+output_path = Path(f"{results_path}/{job_id}")
+output_path.mkdir(exist_ok=True)
+
+
+# initialise the LightningModule
+net = LymphomaNet()
+
+# set up loggers and checkpoints
+# log_dir = os.path.join(root_dir, "logs")
+# tb_logger = pytorch_lightning.loggers.TensorBoardLogger(
+#     save_dir=log_dir
+# )
+checkpoint_callback = pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint(
+    filepath=os.path.join(output_path, "{epoch}-{val_loss:.2f}-{val_dice:.2f}")
+)
+
+# initialise Lightning's trainer.
+trainer = pytorch_lightning.Trainer(
+    gpus=[0],
+    max_epochs=5000,
+    # logger=tb_logger,
+    checkpoint_callback=checkpoint_callback,
+    num_sanity_val_steps=1,
+)
+
+# train
+trainer.fit(net)
+
+print(
+    f"train completed, best_metric: {net.best_val_dice:.4f} at epoch {net.best_val_epoch}"
+)
+
+
+net.eval()
+device = torch.device("cuda:0")
+net.to(device)
+with torch.no_grad():
+    for i, val_data in enumerate(net.val_dataloader()):
+        patient = val_data["patient"][0]
+
+        roi_size = PATCH_SIZE
+        sw_batch_size = 4
+        val_outputs = sliding_window_inference(
+            val_data["image"].to(device), roi_size, sw_batch_size, net
+        )
+
+        data_path = output_path / f'transformed_data_{patient}.nii.gz'
+        label_path = output_path / f'transformed_label_{patient}.nii.gz'
+        pred_path = output_path / f'predicted_segmentation_{patient}.nii.gz'
+        nib.save(nib.Nifti1Image(val_data['image'][0][0].numpy(), np.eye(4)), data_path)
+        nib.save(
+            nib.Nifti1Image(val_data['label'][0][0].numpy(), np.eye(4)), label_path
+        )
+        nib.save(
+            nib.Nifti1Image(
+                torch.argmax(val_outputs, dim=1)[0].cpu().numpy().astype(np.float32),
+                np.eye(4),
+            ),
+            pred_path,
+        )
