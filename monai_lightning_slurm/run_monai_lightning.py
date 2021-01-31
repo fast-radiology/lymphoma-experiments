@@ -13,11 +13,12 @@ from monai.networks.layers import Norm
 from monai.metrics import compute_meandice
 from monai.utils import set_determinism
 
+from helpers import PIXDIM, train_val_split, DataStatsdWithPatient
+
 monai.config.print_config()
 
 device = torch.device('cuda:0')
 
-PIXDIM = json.loads(os.environ.get('PIXDIM', '[0.7, 0.7, 0.7]'))
 PATCH_SIZE = json.loads(os.environ.get('PATCH_SIZE', '[256, 256, 16]'))
 CHANNELS = json.loads(os.environ.get('CHANNELS', '[16, 32, 64]'))
 STRIDES = json.loads(os.environ.get('STRIDES', '[2, 2, 2, 2]'))
@@ -74,13 +75,13 @@ class LymphomaNet(pytorch_lightning.LightningModule):
             {
                 'image': image_name,
                 'label': label_name,
-                'patient': image_name.split('/')[1]
+                'patient': image_name.split('/')[-1]
                 .replace('data', '')
                 .replace('.nii.gz', ''),
             }
             for image_name, label_name in zip(train_images, train_labels)
         ]
-        train_files, val_files = data_dicts[:6] + data_dicts[8:], data_dicts[6:8]
+        train_files, val_files = train_val_split(data_dicts)
         print(
             f'Training patients: {len(train_files)}, Validation patients: {len(val_files)}'
         )
@@ -94,6 +95,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
                 Spacingd(
                     keys=["image", "label"], pixdim=PIXDIM, mode=("bilinear", "nearest")
                 ),
+                DataStatsdWithPatient(keys=["image", "label"]),
                 ScaleIntensityRanged(
                     keys=["image"],
                     a_min=-100,
@@ -124,6 +126,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
                 Spacingd(
                     keys=["image", "label"], pixdim=PIXDIM, mode=("bilinear", "nearest")
                 ),
+                DataStatsdWithPatient(keys=["image", "label"]),
                 ScaleIntensityRanged(
                     keys=["image"],
                     a_min=-100,

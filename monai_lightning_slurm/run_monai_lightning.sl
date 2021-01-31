@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1
-#SBATCH --mem=10000
+#SBATCH --mem=8000
 #SBATCH --partition=tesla
 #SBATCH --time=7-0
 
