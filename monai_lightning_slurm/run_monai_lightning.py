@@ -57,14 +57,14 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         return self._model(x)
 
     def prepare_data(self):
-        train_images = sorted(
+        data_images = sorted(
             [
                 os.path.join(data_path, x)
                 for x in os.listdir(data_path)
                 if x.startswith('data')
             ]
         )
-        train_labels = sorted(
+        data_labels = sorted(
             [
                 os.path.join(data_path, x)
                 for x in os.listdir(data_path)
@@ -79,7 +79,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
                 .replace('data', '')
                 .replace('.nii.gz', ''),
             }
-            for image_name, label_name in zip(train_images, train_labels)
+            for image_name, label_name in zip(data_images, data_labels)
         ]
         train_files, val_files = train_val_split(data_dicts)
         print(
