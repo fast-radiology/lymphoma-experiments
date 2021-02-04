@@ -215,7 +215,7 @@ net = LymphomaNet()
 checkpoint_callback = pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint(
     monitor="val_dice",
     dirpath=output_path,
-    filepath="{epoch}-{val_loss:.2f}-{val_dice:.2f}",
+    filename="{epoch}-{val_loss:.2f}-{val_dice:.2f}",
     save_top_k=3,
 )
 
