@@ -158,7 +158,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         return val_loader
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self._model.parameters(), 1e-3)
+        optimizer = torch.optim.Adam(self._model.parameters(), 1e-7)
         return optimizer
 
     def training_step(self, batch, batch_idx):
@@ -213,7 +213,10 @@ net = LymphomaNet()
 #     save_dir=log_dir
 # )
 checkpoint_callback = pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint(
-    filepath=os.path.join(output_path, "{epoch}-{val_loss:.2f}-{val_dice:.2f}")
+    monitor="val_dice",
+    dirpath=output_path,
+    filepath="{epoch}-{val_loss:.2f}-{val_dice:.2f}",
+    save_top_k=3,
 )
 
 # initialise Lightning's trainer.
@@ -235,6 +238,9 @@ print(
 
 net.eval()
 device = torch.device("cuda:0")
+net = LymphomaNet.load_from_checkpoint(
+    checkpoint_path=checkpoint_callback.best_model_path
+)
 net.to(device)
 with torch.no_grad():
     for i, val_data in enumerate(net.val_dataloader()):
