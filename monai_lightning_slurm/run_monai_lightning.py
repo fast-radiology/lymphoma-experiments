@@ -158,7 +158,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         return val_loader
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self._model.parameters(), 1e-7)
+        optimizer = torch.optim.Adam(self._model.parameters(), 1e-5)
         return optimizer
 
     def training_step(self, batch, batch_idx):
@@ -217,6 +217,7 @@ checkpoint_callback = pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoi
     dirpath=output_path,
     filename="{epoch}-{val_loss:.2f}-{val_dice:.2f}",
     save_top_k=3,
+    mode='max',
 )
 
 # initialise Lightning's trainer.
