@@ -22,6 +22,9 @@ device = torch.device('cuda:0')
 PATCH_SIZE = json.loads(os.environ.get('PATCH_SIZE', '[256, 256, 16]'))
 CHANNELS = json.loads(os.environ.get('CHANNELS', '[16, 32, 64]'))
 STRIDES = json.loads(os.environ.get('STRIDES', '[2, 2, 2, 2]'))
+BATCH_SIZE = 1
+NUM_EPOCHS = 5000
+
 
 data_path = os.environ.get('DATA_PATH')
 cache_path = os.environ.get('CACHE_PATH')
@@ -149,17 +152,20 @@ class LymphomaNet(pytorch_lightning.LightningModule):
 
     def train_dataloader(self):
         train_loader = DataLoader(
-            self.train_ds, batch_size=1, shuffle=True, num_workers=0
+            self.train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0
         )
         return train_loader
 
     def val_dataloader(self):
-        val_loader = DataLoader(self.val_ds, batch_size=1, num_workers=0)
+        val_loader = DataLoader(self.val_ds, batch_size=BATCH_SIZE, num_workers=0)
         return val_loader
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self._model.parameters(), 1e-3)
-        return optimizer
+        optimizer = torch.optim.Adam(self._model.parameters(), 1e-5)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=5e-3, total_steps=NUM_EPOCHS * BATCH_SIZE, verbose=True
+        )
+        return [optimizer], [scheduler]
 
     def training_step(self, batch, batch_idx):
         images, labels = batch["image"], batch["label"]
@@ -213,13 +219,17 @@ net = LymphomaNet()
 #     save_dir=log_dir
 # )
 checkpoint_callback = pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint(
-    filepath=os.path.join(output_path, "{epoch}-{val_loss:.2f}-{val_dice:.2f}")
+    monitor="val_dice",
+    dirpath=output_path,
+    filename="{epoch}-{val_loss:.2f}-{val_dice:.2f}",
+    save_top_k=3,
+    mode='max',
 )
 
 # initialise Lightning's trainer.
 trainer = pytorch_lightning.Trainer(
     gpus=[0],
-    max_epochs=5000,
+    max_epochs=NUM_EPOCHS,
     # logger=tb_logger,
     checkpoint_callback=checkpoint_callback,
     num_sanity_val_steps=1,
@@ -235,6 +245,9 @@ print(
 
 net.eval()
 device = torch.device("cuda:0")
+net = LymphomaNet.load_from_checkpoint(
+    checkpoint_path=checkpoint_callback.best_model_path
+)
 net.to(device)
 with torch.no_grad():
     for i, val_data in enumerate(net.val_dataloader()):

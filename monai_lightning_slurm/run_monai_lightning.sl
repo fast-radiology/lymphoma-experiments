@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH --mem=8000
-#SBATCH --partition=tesla
+#SBATCH --partition=altair-gpu
 #SBATCH --time=7-0
 
 module load cuda/10.0.130_410.48
