@@ -7,3 +7,6 @@ pillow==8.0.1
 torchvision==0.8.1
 tqdm==4.45.0
 gdown==3.12.2
+# If getting https://stackoverflow.com/questions/59441794/error-could-not-build-wheels-for-cryptography-which-use-pep-517-and-cannot-be-i
+# cryptography==3.1.1  # >= dependency of mlflow, however the newest version has build problems
+mlflow==1.13.1
