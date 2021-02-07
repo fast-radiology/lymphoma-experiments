@@ -243,12 +243,13 @@ print(
 )
 
 
-net.eval()
 device = torch.device("cuda:0")
 net = LymphomaNet.load_from_checkpoint(
     checkpoint_path=checkpoint_callback.best_model_path
 )
+net.eval()
 net.to(device)
+net.prepare_data()
 with torch.no_grad():
     for i, val_data in enumerate(net.val_dataloader()):
         patient = val_data["patient"][0]
