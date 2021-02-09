@@ -60,20 +60,21 @@ class LymphomaNet(pytorch_lightning.LightningModule):
     def forward(self, x):
         return self._model(x)
 
-    def prepare_data(self):
+    def log_params(self):
         mlflow.log_params({
             "NUM_EPOCHS": NUM_EPOCHS,
             "BATCH_SIZE": BATCH_SIZE,
             "PATCH_SIZE": PATCH_SIZE,
             "PIXDIM": PIXDIM,
-            "MODEL": {
-                "net": "UNet",
-                "channels": CHANNELS,
-                "strides": STRIDES,
-                "dropout": 0.2
-            },
+            'MODEL': {
+                'net': 'UNet',
+                'channels': CHANNELS,
+                'strides': STRIDES,
+                'dropout': 0.2
+            }
         })
 
+    def prepare_data(self):
         data_images = sorted(
             [
                 os.path.join(data_path, x)
@@ -259,6 +260,7 @@ trainer = pytorch_lightning.Trainer(
 
 # train
 with mlflow.start_run() as run:
+    net.log_params()
     mlflow.log_artifact(__file__)
     trainer.fit(net)
 
