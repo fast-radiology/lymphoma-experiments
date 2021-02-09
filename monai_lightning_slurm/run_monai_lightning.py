@@ -66,6 +66,12 @@ class LymphomaNet(pytorch_lightning.LightningModule):
             "BATCH_SIZE": BATCH_SIZE,
             "PATCH_SIZE": PATCH_SIZE,
             "PIXDIM": PIXDIM,
+            "MODEL": {
+                "net": "UNet",
+                "channels": CHANNELS,
+                "strides": STRIDES,
+                "dropout": 0.2
+            },
         })
 
         data_images = sorted(
@@ -180,7 +186,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         output = self.forward(images)
         loss = self.loss_function(output, labels)
         # tensorboard_logs = {"train_loss": loss.item()}
-        self.log("train_loss", loss, on_epoch=True)  # mlflow
+        self.log("train_loss", loss, on_epoch=True, on_step=False)  # mlflow
         return {"loss": loss}  # "log": tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
@@ -213,8 +219,10 @@ class LymphomaNet(pytorch_lightning.LightningModule):
             f"\nbest mean dice: {self.best_val_dice:.4f} at epoch: {self.best_val_epoch}"
         )
 
-        self.log("val_dice", mean_val_dice, on_epoch=True)  # mlflow
-        self.log("val_loss", mean_val_loss, on_epoch=True)  # mlflow
+        # MLFlow
+        self.log('best_val_dice', self.best_val_dice, on_epoch=True, on_step=False)
+        self.log("val_dice", mean_val_dice, on_epoch=True, on_step=False)
+        self.log("val_loss", mean_val_loss, on_epoch=True, on_step=False)
 
         return {"log": tensorboard_logs}
 
@@ -251,7 +259,8 @@ trainer = pytorch_lightning.Trainer(
 
 # train
 with mlflow.start_run() as run:
-  trainer.fit(net)
+    mlflow.log_artifact(__file__)
+    trainer.fit(net)
 
 print(
     f"train completed, best_metric: {net.best_val_dice:.4f} at epoch {net.best_val_epoch}"
