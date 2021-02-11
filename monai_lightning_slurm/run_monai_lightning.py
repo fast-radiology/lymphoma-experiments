@@ -5,6 +5,7 @@ import nibabel as nib
 
 import torch
 import pytorch_lightning
+import mlflow
 import monai
 from monai.data import NiftiSaver, DataLoader, Dataset, PersistentDataset
 from monai.transforms import *
@@ -58,6 +59,20 @@ class LymphomaNet(pytorch_lightning.LightningModule):
 
     def forward(self, x):
         return self._model(x)
+
+    def log_params(self):
+        mlflow.log_params({
+            "NUM_EPOCHS": NUM_EPOCHS,
+            "BATCH_SIZE": BATCH_SIZE,
+            "PATCH_SIZE": PATCH_SIZE,
+            "PIXDIM": PIXDIM,
+            'MODEL': {
+                'net': 'UNet',
+                'channels': CHANNELS,
+                'strides': STRIDES,
+                'dropout': 0.2
+            }
+        })
 
     def prepare_data(self):
         data_images = sorted(
@@ -172,6 +187,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         output = self.forward(images)
         loss = self.loss_function(output, labels)
         # tensorboard_logs = {"train_loss": loss.item()}
+        self.log("train_loss", loss, on_epoch=True, on_step=False)  # mlflow
         return {"loss": loss}  # "log": tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
@@ -203,12 +219,19 @@ class LymphomaNet(pytorch_lightning.LightningModule):
             f"current epoch: {self.current_epoch} current mean dice: {mean_val_dice:.4f}"
             f"\nbest mean dice: {self.best_val_dice:.4f} at epoch: {self.best_val_epoch}"
         )
+
+        # MLFlow
+        self.log('best_val_dice', self.best_val_dice, on_epoch=True, on_step=False)
+        self.log("val_dice", mean_val_dice, on_epoch=True, on_step=False)
+        self.log("val_loss", mean_val_loss, on_epoch=True, on_step=False)
+
         return {"log": tensorboard_logs}
 
 
 output_path = Path(f"{results_path}/{job_id}")
 output_path.mkdir(exist_ok=True)
 
+mlflow.pytorch.autolog(log_models=False)
 
 # initialise the LightningModule
 net = LymphomaNet()
@@ -236,7 +259,10 @@ trainer = pytorch_lightning.Trainer(
 )
 
 # train
-trainer.fit(net)
+with mlflow.start_run() as run:
+    net.log_params()
+    mlflow.log_artifact(__file__)
+    trainer.fit(net)
 
 print(
     f"train completed, best_metric: {net.best_val_dice:.4f} at epoch {net.best_val_epoch}"

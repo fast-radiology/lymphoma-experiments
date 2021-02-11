@@ -7,3 +7,4 @@ pillow==8.0.1
 torchvision==0.8.1
 tqdm==4.45.0
 gdown==3.12.2
+mlflow==1.13.1
