@@ -259,13 +259,45 @@ with torch.no_grad():
             val_data["image"].to(device), roi_size, sw_batch_size, net
         )
 
-        data_path = output_path / f'transformed_data_{patient}.nii.gz'
-        pred_path = output_path / f'predicted_segmentation_{patient}.nii.gz'
-        nib.save(nib.Nifti1Image(val_data['image'][0][0].numpy(), np.eye(4)), data_path)
+        data_path = output_path / f"transformed_data_{patient}.nii.gz"
+        label_path = output_path / f"transformed_label_{patient}.nii.gz"
+        pred_path = output_path / f"predicted_segmentation_{patient}.nii.gz"
+        original_size_pred_path = (
+            output_path / f"predicted_segmentation_original_size_{patient}.nii.gz"
+        )
         nib.save(
             nib.Nifti1Image(
-                torch.argmax(val_outputs, dim=1)[0].cpu().numpy().astype(np.float32),
-                np.eye(4),
+                val_data["image"][0][0].numpy(), val_data["image_meta_dict"]["affine"]
+            ),
+            data_path,
+        )
+        nib.save(
+            nib.Nifti1Image(
+                val_data["label"][0][0].numpy(), val_data["label_meta_dict"]["affine"]
+            ),
+            label_path,
+        )
+        preds = torch.argmax(val_outputs, dim=1)[0].cpu().numpy().astype(np.float32)
+        nib.save(
+            nib.Nifti1Image(
+                preds,
+                val_data["label_meta_dict"]["affine"],
             ),
             pred_path,
+        )
+        original_size_pred = np.zeros(
+            transformed['image_meta_dict']['spatial_shape'], dtype=np.float32
+        )
+        original_size_pred[
+            val_data['foreground_start_coord'][0] : val_data['foreground_end_coord'][0],
+            val_data['foreground_start_coord'][1] : val_data['foreground_end_coord'][1],
+            val_data['foreground_start_coord'][2] : val_data['foreground_end_coord'][2],
+        ] = preds
+
+        nib.save(
+            nib.Nifti1Image(
+                original_size_pred,
+                val_data['image_meta_dict']['original_affine'],
+            ),
+            original_size_pred_path,
         )
