@@ -14,7 +14,7 @@ from monai.networks.layers import Norm
 from monai.metrics import compute_meandice
 from monai.utils import set_determinism
 
-from helpers import PIXDIM, train_val_split, DataStatsdWithPatient
+from helpers import PIXDIM, train_val_split, DataStatsdWithPatient, StoreShaped
 
 monai.config.print_config()
 
@@ -155,6 +155,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
                     b_max=1.0,
                     clip=True,
                 ),
+                StoreShaped(keys=['image']),
                 CropForegroundd(keys=["image", "label"], source_key="image"),
                 ToTensord(keys=["image", "label"]),
             ]
@@ -294,39 +295,57 @@ with torch.no_grad():
         original_size_pred_path = (
             output_path / f"predicted_segmentation_original_size_{patient}.nii.gz"
         )
+
         nib.save(
             nib.Nifti1Image(
-                val_data["image"][0][0].numpy(), val_data["image_meta_dict"]["affine"]
+                val_data["image"][0][0].numpy(),
+                val_data["image_meta_dict"]["affine"][0].numpy(),
             ),
             data_path,
         )
         nib.save(
             nib.Nifti1Image(
-                val_data["label"][0][0].numpy(), val_data["label_meta_dict"]["affine"]
+                val_data["label"][0][0].numpy(),
+                val_data["label_meta_dict"]["affine"][0].numpy(),
             ),
             label_path,
         )
-        preds = torch.argmax(val_outputs, dim=1)[0].cpu().numpy().astype(np.float32)
+        preds = torch.argmax(val_outputs, dim=1).cpu().numpy().astype(np.float32)
         nib.save(
             nib.Nifti1Image(
-                preds,
-                val_data["label_meta_dict"]["affine"],
+                preds[0],
+                val_data["label_meta_dict"]["affine"][0].numpy(),
             ),
             pred_path,
         )
+
+        # Reverse transform order
         original_size_pred = np.zeros(
-            transformed['image_meta_dict']['spatial_shape'], dtype=np.float32
+            val_data['image_last_seen_shape'][0].numpy(), dtype=np.float32
         )
         original_size_pred[
+            :,
             val_data['foreground_start_coord'][0] : val_data['foreground_end_coord'][0],
             val_data['foreground_start_coord'][1] : val_data['foreground_end_coord'][1],
             val_data['foreground_start_coord'][2] : val_data['foreground_end_coord'][2],
         ] = preds
 
+        original_spacing_transform = Spacing(
+            val_data['image_meta_dict']['pixdim'][0, 1:4], mode="nearest"
+        )
+        original_spacing_preds = original_spacing_transform(
+            original_size_pred, affine=val_data['image_meta_dict']['affine'].numpy()[0]
+        )[0]
+
+        assert (
+            original_spacing_preds[0].shape
+            == val_data['image_meta_dict']['spatial_shape'].numpy()
+        ).all()
+
         nib.save(
             nib.Nifti1Image(
-                original_size_pred,
-                val_data['image_meta_dict']['original_affine'],
+                original_spacing_preds[0],
+                val_data['image_meta_dict']['original_affine'][0].numpy(),
             ),
             original_size_pred_path,
         )

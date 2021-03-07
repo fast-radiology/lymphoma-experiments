@@ -12,7 +12,7 @@ export DATA_PATH="$HOME/lymphoma_data/nifti_package_lymphoma"
 export RESULTS_PATH="$HOME/lymphoma_data"
 export MODEL_PATH="$HOME/lymphoma_data/16695679/epoch=3540-val_loss=0.09-val_dice=0.69.ckpt"
 export PREDICTION_PATH="$HOME/lymphoma_data/P02-additional-predictions"
-export CACHE_PATH="$HOME/lymphoma_data/dataset-cache"
+export CACHE_PATH="$HOME/lymphoma_data/dataset-cache/${SLURM_JOBID}"
 source /home/users/${USER}/monai/bin/activate
 
 cat <<EOF
