@@ -1,5 +1,8 @@
 import logging
+import numpy as np
 from monai.transforms import DataStatsd
+from monai.transforms.compose import MapTransform
+
 
 PIXDIM = [0.615234, 0.615234, 1.000000]
 
@@ -24,4 +27,12 @@ class DataStatsdWithPatient(DataStatsd):
         logger.debug('\n')
         logger.debug(d['patient'])
         super().__call__(data)
+        return d
+
+
+class StoreShaped(MapTransform):
+    def __call__(self, data, suffix='last_seen_shape'):
+        d = dict(data)
+        for key in self.keys:
+            d[f'{key}_{suffix}'] = np.array(d[key].shape)
         return d

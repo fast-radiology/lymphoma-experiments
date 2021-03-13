@@ -14,23 +14,23 @@ from monai.networks.layers import Norm
 from monai.metrics import compute_meandice
 from monai.utils import set_determinism
 
-from helpers import PIXDIM, train_val_split, DataStatsdWithPatient
+from helpers import PIXDIM, train_val_split, DataStatsdWithPatient, StoreShaped
 
 monai.config.print_config()
 
-device = torch.device('cuda:0')
+device = torch.device("cuda:0")
 
-PATCH_SIZE = json.loads(os.environ.get('PATCH_SIZE', '[256, 256, 16]'))
-CHANNELS = json.loads(os.environ.get('CHANNELS', '[16, 32, 64]'))
-STRIDES = json.loads(os.environ.get('STRIDES', '[2, 2, 2, 2]'))
+PATCH_SIZE = json.loads(os.environ.get("PATCH_SIZE", "[256, 256, 16]"))
+CHANNELS = json.loads(os.environ.get("CHANNELS", "[16, 32, 64]"))
+STRIDES = json.loads(os.environ.get("STRIDES", "[2, 2, 2, 2]"))
 BATCH_SIZE = 1
 NUM_EPOCHS = 5000
 
 
-data_path = os.environ.get('DATA_PATH')
-cache_path = os.environ.get('CACHE_PATH')
-results_path = os.environ.get('RESULTS_PATH')
-job_id = os.environ.get('SLURM_JOBID')
+data_path = os.environ.get("DATA_PATH")
+cache_path = os.environ.get("CACHE_PATH")
+results_path = os.environ.get("RESULTS_PATH")
+job_id = os.environ.get("SLURM_JOBID")
 
 
 class LymphomaNet(pytorch_lightning.LightningModule):
@@ -61,55 +61,57 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         return self._model(x)
 
     def log_params(self):
-        mlflow.log_params({
-            "NUM_EPOCHS": NUM_EPOCHS,
-            "BATCH_SIZE": BATCH_SIZE,
-            "PATCH_SIZE": PATCH_SIZE,
-            "PIXDIM": PIXDIM,
-            'MODEL': {
-                'net': 'UNet',
-                'channels': CHANNELS,
-                'strides': STRIDES,
-                'dropout': 0.2
+        mlflow.log_params(
+            {
+                "NUM_EPOCHS": NUM_EPOCHS,
+                "BATCH_SIZE": BATCH_SIZE,
+                "PATCH_SIZE": PATCH_SIZE,
+                "PIXDIM": PIXDIM,
+                "MODEL": {
+                    "net": "UNet",
+                    "channels": CHANNELS,
+                    "strides": STRIDES,
+                    "dropout": 0.2,
+                },
             }
-        })
+        )
 
     def prepare_data(self):
         data_images = sorted(
             [
                 os.path.join(data_path, x)
                 for x in os.listdir(data_path)
-                if x.startswith('data')
+                if x.startswith("data")
             ]
         )
         data_labels = sorted(
             [
                 os.path.join(data_path, x)
                 for x in os.listdir(data_path)
-                if x.startswith('label')
+                if x.startswith("label")
             ]
         )
         data_dicts = [
             {
-                'image': image_name,
-                'label': label_name,
-                'patient': image_name.split('/')[-1]
-                .replace('data', '')
-                .replace('.nii.gz', ''),
+                "image": image_name,
+                "label": label_name,
+                "patient": image_name.split("/")[-1]
+                .replace("data", "")
+                .replace(".nii.gz", ""),
             }
             for image_name, label_name in zip(data_images, data_labels)
         ]
         train_files, val_files = train_val_split(data_dicts)
         print(
-            f'Training patients: {len(train_files)}, Validation patients: {len(val_files)}'
+            f"Training patients: {len(train_files)}, Validation patients: {len(val_files)}"
         )
 
         set_determinism(seed=0)
 
         train_transforms = Compose(
             [
-                LoadNiftid(keys=['image', 'label']),
-                AddChanneld(keys=['image', 'label']),
+                LoadNiftid(keys=["image", "label"]),
+                AddChanneld(keys=["image", "label"]),
                 Spacingd(
                     keys=["image", "label"], pixdim=PIXDIM, mode=("bilinear", "nearest")
                 ),
@@ -134,13 +136,13 @@ class LymphomaNet(pytorch_lightning.LightningModule):
                     image_threshold=0,
                 ),
                 RandFlipd(["image", "label"], spatial_axis=[0, 1, 2], prob=0.5),
-                ToTensord(keys=['image', 'label']),
+                ToTensord(keys=["image", "label"]),
             ]
         )
         val_transforms = Compose(
             [
-                LoadNiftid(keys=['image', 'label']),
-                AddChanneld(keys=['image', 'label']),
+                LoadNiftid(keys=["image", "label"]),
+                AddChanneld(keys=["image", "label"]),
                 Spacingd(
                     keys=["image", "label"], pixdim=PIXDIM, mode=("bilinear", "nearest")
                 ),
@@ -153,8 +155,9 @@ class LymphomaNet(pytorch_lightning.LightningModule):
                     b_max=1.0,
                     clip=True,
                 ),
+                StoreShaped(keys=['image']),
                 CropForegroundd(keys=["image", "label"], source_key="image"),
-                ToTensord(keys=['image', 'label']),
+                ToTensord(keys=["image", "label"]),
             ]
         )
 
@@ -172,7 +175,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         return train_loader
 
     def val_dataloader(self):
-        val_loader = DataLoader(self.val_ds, batch_size=BATCH_SIZE, num_workers=0)
+        val_loader = DataLoader(self.val_ds, batch_size=1, num_workers=0)
         return val_loader
 
     def configure_optimizers(self):
@@ -221,7 +224,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         )
 
         # MLFlow
-        self.log('best_val_dice', self.best_val_dice, on_epoch=True, on_step=False)
+        self.log("best_val_dice", self.best_val_dice, on_epoch=True, on_step=False)
         self.log("val_dice", mean_val_dice, on_epoch=True, on_step=False)
         self.log("val_loss", mean_val_loss, on_epoch=True, on_step=False)
 
@@ -246,7 +249,7 @@ checkpoint_callback = pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoi
     dirpath=output_path,
     filename="{epoch}-{val_loss:.2f}-{val_dice:.2f}",
     save_top_k=3,
-    mode='max',
+    mode="max",
 )
 
 # initialise Lightning's trainer.
@@ -286,17 +289,63 @@ with torch.no_grad():
             val_data["image"].to(device), roi_size, sw_batch_size, net
         )
 
-        data_path = output_path / f'transformed_data_{patient}.nii.gz'
-        label_path = output_path / f'transformed_label_{patient}.nii.gz'
-        pred_path = output_path / f'predicted_segmentation_{patient}.nii.gz'
-        nib.save(nib.Nifti1Image(val_data['image'][0][0].numpy(), np.eye(4)), data_path)
+        data_path = output_path / f"transformed_data_{patient}.nii.gz"
+        label_path = output_path / f"transformed_label_{patient}.nii.gz"
+        pred_path = output_path / f"predicted_segmentation_{patient}.nii.gz"
+        original_size_pred_path = (
+            output_path / f"predicted_segmentation_original_size_{patient}.nii.gz"
+        )
+
         nib.save(
-            nib.Nifti1Image(val_data['label'][0][0].numpy(), np.eye(4)), label_path
+            nib.Nifti1Image(
+                val_data["image"][0][0].numpy(),
+                val_data["image_meta_dict"]["affine"][0].numpy(),
+            ),
+            data_path,
         )
         nib.save(
             nib.Nifti1Image(
-                torch.argmax(val_outputs, dim=1)[0].cpu().numpy().astype(np.float32),
-                np.eye(4),
+                val_data["label"][0][0].numpy(),
+                val_data["label_meta_dict"]["affine"][0].numpy(),
+            ),
+            label_path,
+        )
+        preds = torch.argmax(val_outputs, dim=1).cpu().numpy().astype(np.float32)
+        nib.save(
+            nib.Nifti1Image(
+                preds[0],
+                val_data["label_meta_dict"]["affine"][0].numpy(),
             ),
             pred_path,
+        )
+
+        # Reverse transform order
+        original_size_pred = np.zeros(
+            val_data['image_last_seen_shape'][0].numpy(), dtype=np.float32
+        )
+        original_size_pred[
+            :,
+            val_data['foreground_start_coord'][0] : val_data['foreground_end_coord'][0],
+            val_data['foreground_start_coord'][1] : val_data['foreground_end_coord'][1],
+            val_data['foreground_start_coord'][2] : val_data['foreground_end_coord'][2],
+        ] = preds
+
+        original_spacing_transform = Spacing(
+            val_data['image_meta_dict']['pixdim'][0, 1:4], mode="nearest"
+        )
+        original_spacing_preds = original_spacing_transform(
+            original_size_pred, affine=val_data['image_meta_dict']['affine'].numpy()[0]
+        )[0]
+
+        assert (
+            original_spacing_preds[0].shape
+            == val_data['image_meta_dict']['spatial_shape'].numpy()
+        ).all()
+
+        nib.save(
+            nib.Nifti1Image(
+                original_spacing_preds[0],
+                val_data['image_meta_dict']['original_affine'][0].numpy(),
+            ),
+            original_size_pred_path,
         )
