@@ -20,10 +20,10 @@ monai.config.print_config()
 
 device = torch.device("cuda:0")
 
-PATCH_SIZE = json.loads(os.environ.get("PATCH_SIZE", "[256, 256, 16]"))
-CHANNELS = json.loads(os.environ.get("CHANNELS", "[16, 32, 64]"))
+PATCH_SIZE = json.loads(os.environ.get("PATCH_SIZE", "[256, 256, 64]"))
+CHANNELS = json.loads(os.environ.get("CHANNELS", "[16, 32, 64, 128]"))
 STRIDES = json.loads(os.environ.get("STRIDES", "[2, 2, 2, 2]"))
-BATCH_SIZE = 1
+BATCH_SIZE = 2
 NUM_EPOCHS = 5000
 
 
@@ -73,6 +73,7 @@ class LymphomaNet(pytorch_lightning.LightningModule):
                     "strides": STRIDES,
                     "dropout": 0.2,
                 },
+                "SLURM_JOB_ID", job_id,
             }
         )
 
