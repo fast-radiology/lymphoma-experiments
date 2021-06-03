@@ -77,27 +77,19 @@ class LymphomaNet(pytorch_lightning.LightningModule):
         )
 
     def prepare_data(self):
-        data_images = sorted(
-            [
-                os.path.join(data_path, x)
-                for x in os.listdir(data_path)
-                if x.startswith("data")
-            ]
+        def get_files(dir):
+            return sorted(
+                [f"{dir}/{x}" for x in os.listdir(dir) if x.endswith(".nii.gz")]
         )
-        data_labels = sorted(
-            [
-                os.path.join(data_path, x)
-                for x in os.listdir(data_path)
-                if x.startswith("label")
-            ]
-        )
+
+        data_images = get_files(os.path.join(data_path, "input_pcss"))
+        data_labels = get_files(os.path.join(data_path, "output_pcss"))
+
         data_dicts = [
             {
                 "image": image_name,
                 "label": label_name,
-                "patient": image_name.split("/")[-1]
-                .replace("data", "")
-                .replace(".nii.gz", ""),
+                "patient": image_name.split("/")[-1].split("_")[1],
             }
             for image_name, label_name in zip(data_images, data_labels)
         ]
